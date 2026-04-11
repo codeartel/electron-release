@@ -1,0 +1,107 @@
+{
+  "name": "shuli",
+  "version": "0.10.4",
+  "description": "书立",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "rollup --config rollup.config.ts --configPlugin typescript --watch",
+    "package": "rm -r ./release & electron-builder build",
+    "publish": "rm -r ./publish & node publish.js",
+    "lint": "eslint --ext .ts,.tsx ."
+  },
+  "keywords": [],
+  "author": {
+    "name": "北京源码觉醒科技有限公司",
+    "email": "feedback@slinote.com"
+  },
+  "license": "AGPL-3.0-only",
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^28.0.3",
+    "@rollup/plugin-json": "^6.1.0",
+    "@rollup/plugin-node-resolve": "^16.0.1",
+    "@rollup/plugin-replace": "^6.0.2",
+    "@rollup/plugin-run": "^3.1.0",
+    "@rollup/plugin-terser": "^0.4.4",
+    "@rollup/plugin-typescript": "^12.1.2",
+    "@rollup/plugin-url": "^8.0.2",
+    "@types/mime-types": "^3.0.1",
+    "@typescript-eslint/eslint-plugin": "^8.28.0",
+    "@typescript-eslint/parser": "^8.28.0",
+    "@types/archiver": "^7.0.0",
+    "mime-types": "^3.0.2",
+    "archiver": "^7.0.1",
+    "css-loader": "^7.1.2",
+    "electron": "41.1.1",
+    "electron-builder": "26.0.12",
+    "electron-updater": "6.6.2",
+    "electron-window-state": "5.0.3",
+    "eslint": "^9.23.0",
+    "eslint-plugin-import": "^2.31.0",
+    "fast-xml-parser": "^5.2.2",
+    "fs-extra": "^11.3.0",
+    "js-yaml": "^4.1.0",
+    "node-loader": "^2.1.0",
+    "rollup": "^4.37.0",
+    "rollup-plugin-dts": "^6.2.1",
+    "rollup-plugin-sourcemaps": "^0.6.3",
+    "ssh2-sftp-client": "^12.0.0",
+    "style-loader": "^4.0.0",
+    "ts-loader": "^9.5.2",
+    "ts-node": "^10.9.2",
+    "tslib": "^2.8.1",
+    "typescript": "^5.8.2"
+  },
+  "build": {
+    "productName": "书立",
+    "appId": "com.codeartel.shuli",
+    "copyright": "© 2024 北京源码觉醒科技有限公司",
+    "files": [
+      "dist",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": true,
+      "notarize": true,
+      "icon": "./assets/icon.mac.icns",
+      "entitlements": "./assets/entitlements.mac.plist",
+      "entitlementsInherit": "./assets/entitlements.mac.plist"
+    },
+    "nsis": {
+      "oneClick": false,
+      "language": "2052",
+      "warningsAsErrors": false,
+      "deleteAppDataOnUninstall": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "icon": "assets/icons",
+      "category": "Utility",
+      "target": [
+        "AppImage",
+        "deb",
+        "rpm"
+      ],
+      "description": "书立",
+      "desktop": {
+        "entry": {
+          "Name": "书立",
+          "Comment": "个体知识管理助手",
+          "Categories": "Utility",
+          "Type": "Application"
+        }
+      }
+    }
+  }
+}
