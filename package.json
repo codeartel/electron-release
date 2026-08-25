@@ -1,6 +1,6 @@
 {
   "name": "shuli",
-  "version": "0.10.7",
+  "version": "0.12.0",
   "description": "书立",
   "private": true,
   "main": "dist/index.js",
