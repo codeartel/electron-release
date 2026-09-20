@@ -1,12 +1,14 @@
 {
   "name": "shuli",
-  "version": "0.12.0",
+  "version": "0.12.3",
   "description": "书立",
   "private": true,
   "main": "dist/index.js",
   "scripts": {
-    "build": "rollup --config rollup.config.ts --configPlugin typescript --watch",
-    "package": "rm -r ./release & electron-builder build",
+    "build": "node scripts/build-native.mjs && rollup --config rollup.config.ts --configPlugin typescript --watch",
+    "build-native": "node scripts/build-native.mjs",
+    "sync-release": "node scripts/sync-release.mjs",
+    "package": "rm -r ./release & node scripts/build-native.mjs && electron-builder build",
     "publish": "rm -r ./publish & node publish.js",
     "lint": "eslint --ext .ts,.tsx ."
   },
@@ -25,22 +27,24 @@
     "@rollup/plugin-terser": "^0.4.4",
     "@rollup/plugin-typescript": "^12.1.2",
     "@rollup/plugin-url": "^8.0.2",
+    "@types/archiver": "^7.0.0",
     "@types/mime-types": "^3.0.1",
     "@typescript-eslint/eslint-plugin": "^8.28.0",
     "@typescript-eslint/parser": "^8.28.0",
-    "@types/archiver": "^7.0.0",
-    "mime-types": "^3.0.2",
     "archiver": "^7.0.1",
+    "compare-versions": "^6.1.1",
     "css-loader": "^7.1.2",
-    "electron": "43.4.1",
+    "electron": "44.4.3",
     "electron-builder": "26.15.3",
     "electron-updater": "6.8.9",
     "electron-window-state": "5.0.3",
     "eslint": "^9.23.0",
     "eslint-plugin-import": "^2.31.0",
     "fast-xml-parser": "^5.2.2",
+    "fflate": "^0.8.3",
     "fs-extra": "^11.3.0",
     "js-yaml": "^4.1.0",
+    "mime-types": "^3.0.2",
     "node-loader": "^2.1.0",
     "rollup": "^4.37.0",
     "rollup-plugin-dts": "^6.2.1",
@@ -63,7 +67,11 @@
     "compression": "maximum",
     "files": [
       "dist",
-      "package.json"
+      "package.json",
+      "native"
+    ],
+    "asarUnpack": [
+      "native/**"
     ],
     "directories": {
       "output": "release"

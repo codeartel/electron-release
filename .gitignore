@@ -2,6 +2,14 @@
 
 # dependencies
 node_modules
+release
+publish
+
+# native 编译工作目录（scripts/build-muhammara.mjs）
+.native-build
+
+# native 编译产物（各开发机与 CI 自行编译，不入库）
+native/muhammara/binding.node
 
 # misc
 .DS_Store
@@ -11,3 +19,22 @@ node_modules
 .env.production.local
 
 npm-debug.log*
+
+# .dbg 调试工作区临时产物（脚本一律保留）
+.dbg/tsc-*.txt
+.dbg/*.log
+.dbg/*.pdf
+.dbg/*.html
+.dbg/*.json
+.dbg/probe-out/
+.dbg/live-pdf-debug/
+.dbg/calibration/
+.dbg/e2e-rebuild/
+.dbg/mark-e2e2-out/
+.dbg/marker-capacity/
+.dbg/marker-probe/
+.dbg/flex-nest/
+.dbg/orient/
+.dbg/bookmark-e2e/
+.dbg/src-build/
+.dbg/ts-verify/

@@ -22,6 +22,42 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Prepare cache key
+        id: versions
+        run: |
+          set -euo pipefail
+          electron=$(node -p 'require("./node_modules/electron/package.json").version')
+          muhammara=$(sed -n "s/.*MUHAMMARA_VERSION = '\([^']*\)'.*/\1/p" scripts/build-muhammara.mjs | head -1)
+          test -n "$electron" && test -n "$muhammara"
+          echo "electron=$electron" >> "$GITHUB_OUTPUT"
+          echo "muhammara=$muhammara" >> "$GITHUB_OUTPUT"
+          echo "cache-key=muhammara-${{ runner.os }}-${{ runner.arch }}-electron-${electron}-muhammara-${muhammara}-script-${{ hashFiles('scripts/build-muhammara.mjs') }}-wrapper-${{ hashFiles('scripts/build-native.mjs') }}" >> "$GITHUB_OUTPUT"
+
+      # 仅恢复缓存；保存统一由编译成功后的 Save 步骤负责（save-always 已废弃且行为不符预期）
+      - name: Restore muhammara binding
+        id: cache-binding
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            native/muhammara/binding.node
+            .native-build/stamp.json
+          key: ${{ steps.versions.outputs.cache-key }}
+
+      # 指纹命中（缓存标记与当前 Electron / muhammara / 构建脚本一致）时自动跳过编译，未命中或产物缺失时重编译
+      - name: Build muhammara binding
+        id: build-binding
+        run: node scripts/build-native.mjs
+
+      # 编译成功后立即保存缓存（不等整个 job 成功），避免后续签名/打包失败导致下次运行重新编译
+      - name: Save muhammara binding
+        if: always() && steps.cache-binding.outputs.cache-hit != 'true' && steps.build-binding.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            native/muhammara/binding.node
+            .native-build/stamp.json
+          key: ${{ steps.versions.outputs.cache-key }}
+
       - name: Build Linux x64
         run: npx electron-builder --linux --x64
         env:
