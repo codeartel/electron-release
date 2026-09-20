@@ -16,7 +16,7 @@
  *   assets/               图标与签名授权文件（镜像）
  *   scripts/              CI 工作流依赖的原生模块构建脚本（镜像）
  *   .github/workflows/    GitHub Actions 打包工作流（镜像）
- *   package.json          元数据与 electron-builder 配置（剔除本地路径依赖）
+ *   package.json          元数据与 electron-builder 配置（剔除本地路径依赖与 Windows 签名配置）
  *   package-lock.json     package.json 变化时通过 npm install --package-lock-only 重生成
  *   .gitignore / .npmrc   仓库配置
  *
@@ -161,6 +161,7 @@ function syncFile(relPath, content) {
 /**
  * 以 electron 的 package.json 为基准生成 release 版：
  * 剔除 file:/绝对路径 依赖（@slinote/service 等仅本地开发存在，CI 上 npm ci 会失败）
+ * 剔除 Windows 签名配置（electron-release 不构建 Windows 目标，证书指纹等仅本地打包使用）
  */
 function buildReleasePackageJson() {
   const pkg = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
@@ -171,6 +172,10 @@ function buildReleasePackageJson() {
         delete pkg[field][name];
       }
     }
+  }
+  if (pkg.build?.win != null) {
+    log('package.json：剔除 Windows 签名配置（build.win）');
+    delete pkg.build.win;
   }
   return `${JSON.stringify(pkg, null, 2)}\n`;
 }

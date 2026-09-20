@@ -35,7 +35,7 @@
     "compare-versions": "^6.1.1",
     "css-loader": "^7.1.2",
     "electron": "44.4.3",
-    "electron-builder": "26.15.3",
+    "electron-builder": "26.16.1",
     "electron-updater": "6.8.9",
     "electron-window-state": "5.0.3",
     "eslint": "^9.23.0",
