@@ -177,6 +177,10 @@ function buildReleasePackageJson() {
     log('package.json：剔除 Windows 签名配置（build.win）');
     delete pkg.build.win;
   }
+  if (pkg.build?.nsis != null) {
+    log('package.json：剔除 Windows 打包配置（build.nsis）');
+    delete pkg.build.nsis;
+  }
   return `${JSON.stringify(pkg, null, 2)}\n`;
 }
 

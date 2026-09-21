@@ -1,6 +1,6 @@
 {
   "name": "shuli",
-  "version": "0.12.3",
+  "version": "0.12.4",
   "description": "书立",
   "private": true,
   "main": "dist/index.js",
@@ -9,7 +9,7 @@
     "build-native": "node scripts/build-native.mjs",
     "sync-release": "node scripts/sync-release.mjs",
     "package": "rm -r ./release & node scripts/build-native.mjs && electron-builder build",
-    "publish": "rm -r ./publish & node publish.js",
+    "publish": "node publish.js",
     "lint": "eslint --ext .ts,.tsx ."
   },
   "keywords": [],
@@ -88,15 +88,6 @@
       "icon": "./assets/icon.mac.icns",
       "entitlements": "./assets/entitlements.mac.plist",
       "entitlementsInherit": "./assets/entitlements.mac.plist"
-    },
-    "nsis": {
-      "oneClick": false,
-      "language": "2052",
-      "warningsAsErrors": false,
-      "deleteAppDataOnUninstall": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "allowToChangeInstallationDirectory": true
     },
     "linux": {
       "icon": "assets/icons",
