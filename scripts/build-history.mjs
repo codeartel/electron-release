@@ -298,6 +298,14 @@ function selfCheck() {
 }
 
 async function main() {
+  // 编译输入自检：发布镜像仓库需由 scripts/sync-release.mjs 同步 native/history 源码，
+  // 缺失时 node-gyp 只会抛出难定位的「binding.gyp not found」
+  const requiredInputs = ['binding.gyp', 'src/history.cc', 'src/history_kernel.cc', 'src/history_kernel.h'];
+  const missing = requiredInputs.filter((rel) => !fs.existsSync(path.join(moduleDir, rel)));
+  if (missing.length > 0) {
+    throw new Error(`缺少编译输入：${missing.join('、')}（目录 ${moduleDir}；发布镜像仓库请先同步 native/history）`);
+  }
+
   const refreshZstd = process.argv.includes('--refresh-zstd');
   const refreshYyjson = process.argv.includes('--refresh-yyjson');
   if (refreshZstd || !fs.existsSync(path.join(zstdDir, 'lib', 'zstd.h'))) {
@@ -323,7 +331,11 @@ async function main() {
     console.error('[build-history] 未找到编译产物 build/Release/history.node');
     process.exit(1);
   }
-  fs.copyFileSync(built, outDir);
+  // 先写临时文件再 rename，不能直接覆盖 outDir：开发期 Electron 可能正映射着旧
+  // binding.node，原地覆盖后 macOS 代码签名缓存失效，下次 require/dlopen 会被 SIGKILL
+  const tempOut = `${outDir}.${process.pid}.tmp`;
+  fs.copyFileSync(built, tempOut);
+  fs.renameSync(tempOut, outDir);
   log(`完成：${path.relative(rootDir, outDir)}`);
 
   selfCheck();

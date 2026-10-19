@@ -74,7 +74,9 @@
     "files": [
       "dist",
       "package.json",
-      "native"
+      "native/**/binding.node",
+      "native/history/deps/yyjson/LICENSE",
+      "native/history/deps/zstd/LICENSE"
     ],
     "asarUnpack": [
       "native/**"

@@ -226,5 +226,10 @@ if (!built) {
 }
 
 fs.mkdirSync(outDir, { recursive: true });
-fs.copyFileSync(built, path.join(outDir, 'binding.node'));
-console.log(`[build-muhammara] 完成：${path.join(outDir, 'binding.node')}`);
+// 先写临时文件再 rename，不能直接覆盖 binding.node：开发期 Electron 可能正映射着旧
+// 产物，原地覆盖后 macOS 代码签名缓存失效，下次 dlopen 会被 SIGKILL
+const outFile = path.join(outDir, 'binding.node');
+const tempOut = `${outFile}.${process.pid}.tmp`;
+fs.copyFileSync(built, tempOut);
+fs.renameSync(tempOut, outFile);
+console.log(`[build-muhammara] 完成：${outFile}`);

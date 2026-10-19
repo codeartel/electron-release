@@ -15,6 +15,8 @@
  *   dist/                 构建产物（镜像：多删少补）
  *   assets/               图标与签名授权文件（镜像）
  *   scripts/              CI 工作流依赖的原生模块构建脚本（镜像）
+ *   native/               原生模块源码与编译输入（git 跟踪文件；编译产物、下载的 zstd 源码
+ *                         与本地测试向量除外）
  *   .github/workflows/    GitHub Actions 打包工作流（镜像）
  *   package.json          元数据与 electron-builder 配置（剔除本地路径依赖与 Windows 签名配置）
  *   package-lock.json     package.json 变化时通过 npm install --package-lock-only 重生成
@@ -186,9 +188,68 @@ function buildReleasePackageJson() {
 
 // ---------- 执行同步 ----------
 log(dryRun ? `预演（不写入）：${releaseDir}` : `同步到：${releaseDir}`);
+/**
+ * 镜像 native/ 的原生模块源码与编译输入：CI 会执行 build-native.mjs 重编 muhammara / history addon，
+ * 缺少 binding.gyp 或源码时编译直接失败。只同步 git 跟踪的文件
+ * （history-golden-vectors.json 仅用于本地向量校验，不参与 CI 构建且体积较大，不同步）；
+ * 编译产物（binding.node、build/）与下载的 deps/zstd 由各机器自行生成，不复制也不删除
+ */
+function mirrorNative() {
+  const label = 'native';
+  const srcRoot = path.join(rootDir, 'native');
+  const destRoot = path.join(releaseDir, 'native');
+  if (!fs.existsSync(srcRoot)) {
+    fail(`源目录不存在：${srcRoot}`);
+  }
+  const generated = (rel) => rel === 'muhammara/binding.node' || rel === 'history/binding.node'
+    || rel === 'history/build' || rel.startsWith('history/build/')
+    || rel === 'history/deps/zstd' || rel.startsWith('history/deps/zstd/');
+  const tracked = execFileSync('git', ['-C', rootDir, 'ls-files', '-z', '--', 'native'], { encoding: 'utf8' })
+    .split('\0')
+    .filter(Boolean)
+    .map((file) => file.slice('native/'.length))
+    .filter((rel) => rel !== 'history/history-golden-vectors.json' && !generated(rel));
+  if (tracked.length === 0) {
+    fail('native 没有任何可同步的源码或编译输入，拒绝同步以防误删');
+  }
+
+  // 目标侧路径统一为 / 分隔，便于与 git 输出的相对路径比较
+  const remainingDest = new Set(
+    fs.existsSync(destRoot) ? walkFiles(destRoot).map((rel) => rel.split(path.sep).join('/')) : []
+  );
+  for (const rel of tracked) {
+    remainingDest.delete(rel);
+    const srcContent = fs.readFileSync(path.join(srcRoot, rel));
+    const destContent = readIfExists(path.join(destRoot, rel));
+    if (destContent && srcContent.equals(destContent)) {
+      continue;
+    }
+    recordChange(`${label}/${rel}`, Boolean(destContent));
+    if (!dryRun) {
+      const dest = path.join(destRoot, rel);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.copyFileSync(path.join(srcRoot, rel), dest);
+    }
+  }
+  for (const rel of remainingDest) {
+    if (generated(rel)) {
+      continue;
+    }
+    details.push(`  ${label}/${rel}（删除）`);
+    stats.removed += 1;
+    if (!dryRun) {
+      fs.rmSync(path.join(destRoot, rel), { force: true });
+    }
+  }
+  if (!dryRun) {
+    pruneEmptyDirs(destRoot);
+  }
+}
+
 mirrorDir('dist', path.join(rootDir, 'dist'), path.join(releaseDir, 'dist'));
 mirrorDir('assets', path.join(rootDir, 'assets'), path.join(releaseDir, 'assets'));
 mirrorDir('scripts', path.join(rootDir, 'scripts'), path.join(releaseDir, 'scripts'));
+mirrorNative();
 mirrorDir('.github/workflows', path.join(rootDir, '.github', 'workflows'), path.join(releaseDir, '.github', 'workflows'));
 
 const packageChanged = syncFile('package.json', buildReleasePackageJson());
