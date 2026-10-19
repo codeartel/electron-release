@@ -14,6 +14,9 @@ native/history/binding.node
 # 产物落盘中断时可能残留的临时文件（脚本以临时文件 + rename 原子替换）
 native/muhammara/binding.node.*.tmp
 native/history/binding.node.*.tmp
+# Windows 上旧产物被占用时改名让位的退役文件（占用进程退出后由下次构建清理）
+native/muhammara/binding.node.old.*
+native/history/binding.node.old.*
 
 # native/history 编译中间产物与 zstd 源码（build-history.mjs 生成；
 # deps/zstd_sources.gypi 源清单入库，deps/zstd 源码目录不入库）

@@ -297,6 +297,66 @@ function selfCheck() {
   log(`自检通过（zstd ${zstdVersion}，delta ${delta.data.length}/${next.length} 字节，diffJson ${ops.length} 条操作）`);
 }
 
+/** 尽可能删除文件：Windows 上被映射/占用的文件删不掉，留给下次构建清理 */
+function removeFileQuietly(file) {
+  try {
+    fs.rmSync(file, { force: true });
+  } catch {
+    // 忽略：仍被占用
+  }
+}
+
+/** 清理历史构建遗留的临时文件与让位文件（Windows 上让位文件常要等占用进程退出后才能删） */
+function cleanStaleBindingFiles() {
+  const prefix = `${path.basename(outDir)}.`;
+  for (const name of fs.readdirSync(moduleDir)) {
+    const stale = name.startsWith(prefix) && (name.endsWith('.tmp') || name.includes('.old.'));
+    if (stale) {
+      removeFileQuietly(path.join(moduleDir, name));
+    }
+  }
+}
+
+/**
+ * 落盘编译产物：先写同目录临时文件再 rename，不能原地覆盖 outDir——开发期 Electron 可能正
+ * 映射着旧 binding.node，macOS 原地覆盖会让代码签名缓存失效，下次 require/dlopen 被 SIGKILL。
+ * Windows 特例：新文件 rename 覆盖「已被进程映射」的旧文件会 EPERM，改为旧文件先改名让位、
+ * 再落新文件（Chromium 更新器同款做法）；旧文件仍被映射时只能保留，不影响新产物加载。
+ */
+function publishBinding(built) {
+  const tempOut = `${outDir}.${process.pid}.tmp`;
+  fs.copyFileSync(built, tempOut);
+  try {
+    fs.renameSync(tempOut, outDir);
+  } catch (error) {
+    const lockedOnWindows = process.platform === 'win32'
+      && fs.existsSync(outDir)
+      && (error.code === 'EPERM' || error.code === 'EACCES' || error.code === 'EBUSY');
+    if (!lockedOnWindows) {
+      removeFileQuietly(tempOut);
+      throw error;
+    }
+    const retired = `${outDir}.old.${process.pid}`;
+    try {
+      fs.renameSync(outDir, retired);
+      fs.renameSync(tempOut, outDir);
+    } catch (swapError) {
+      // 让位或落位失败：尽量把旧产物还原，避免目录里新旧两个都不在
+      if (fs.existsSync(retired) && !fs.existsSync(outDir)) {
+        try {
+          fs.renameSync(retired, outDir);
+        } catch {
+          // 还原失败：让位文件仍在，旧产物至少没丢
+        }
+      }
+      removeFileQuietly(tempOut);
+      throw new Error(`替换 ${path.relative(rootDir, outDir)} 失败（${swapError.code ?? swapError.message}）：旧产物被占用（运行中的书立/Electron 可能已加载 binding.node），请关闭后重试`);
+    }
+    removeFileQuietly(retired);
+  }
+  cleanStaleBindingFiles();
+}
+
 async function main() {
   // 编译输入自检：发布镜像仓库需由 scripts/sync-release.mjs 同步 native/history 源码，
   // 缺失时 node-gyp 只会抛出难定位的「binding.gyp not found」
@@ -331,11 +391,7 @@ async function main() {
     console.error('[build-history] 未找到编译产物 build/Release/history.node');
     process.exit(1);
   }
-  // 先写临时文件再 rename，不能直接覆盖 outDir：开发期 Electron 可能正映射着旧
-  // binding.node，原地覆盖后 macOS 代码签名缓存失效，下次 require/dlopen 会被 SIGKILL
-  const tempOut = `${outDir}.${process.pid}.tmp`;
-  fs.copyFileSync(built, tempOut);
-  fs.renameSync(tempOut, outDir);
+  publishBinding(built);
   log(`完成：${path.relative(rootDir, outDir)}`);
 
   selfCheck();

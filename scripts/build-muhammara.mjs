@@ -225,11 +225,68 @@ if (!built) {
   process.exit(1);
 }
 
+/** 尽可能删除文件：Windows 上被映射/占用的文件删不掉，留给下次构建清理 */
+function removeFileQuietly(file) {
+  try {
+    fs.rmSync(file, { force: true });
+  } catch {
+    // 忽略：仍被占用
+  }
+}
+
+/** 清理历史构建遗留的临时文件与让位文件（Windows 上让位文件常要等占用进程退出后才能删） */
+function cleanStaleBindingFiles(target) {
+  const dir = path.dirname(target);
+  const prefix = `${path.basename(target)}.`;
+  for (const name of fs.readdirSync(dir)) {
+    const stale = name.startsWith(prefix) && (name.endsWith('.tmp') || name.includes('.old.'));
+    if (stale) {
+      removeFileQuietly(path.join(dir, name));
+    }
+  }
+}
+
+/**
+ * 落盘编译产物：先写同目录临时文件再 rename，不能原地覆盖 target——开发期 Electron 可能正
+ * 映射着旧 binding.node，macOS 原地覆盖会让代码签名缓存失效，下次 dlopen 被 SIGKILL。
+ * Windows 特例：新文件 rename 覆盖「已被进程映射」的旧文件会 EPERM，改为旧文件先改名让位、
+ * 再落新文件（Chromium 更新器同款做法）；旧文件仍被映射时只能保留，不影响新产物加载。
+ */
+function publishBinding(built, target) {
+  const tempOut = `${target}.${process.pid}.tmp`;
+  fs.copyFileSync(built, tempOut);
+  try {
+    fs.renameSync(tempOut, target);
+  } catch (error) {
+    const lockedOnWindows = process.platform === 'win32'
+      && fs.existsSync(target)
+      && (error.code === 'EPERM' || error.code === 'EACCES' || error.code === 'EBUSY');
+    if (!lockedOnWindows) {
+      removeFileQuietly(tempOut);
+      throw error;
+    }
+    const retired = `${target}.old.${process.pid}`;
+    try {
+      fs.renameSync(target, retired);
+      fs.renameSync(tempOut, target);
+    } catch (swapError) {
+      // 让位或落位失败：尽量把旧产物还原，避免目录里新旧两个都不在
+      if (fs.existsSync(retired) && !fs.existsSync(target)) {
+        try {
+          fs.renameSync(retired, target);
+        } catch {
+          // 还原失败：让位文件仍在，旧产物至少没丢
+        }
+      }
+      removeFileQuietly(tempOut);
+      throw new Error(`替换 ${path.relative(rootDir, target)} 失败（${swapError.code ?? swapError.message}）：旧产物被占用（运行中的书立/Electron 可能已加载 binding.node），请关闭后重试`);
+    }
+    removeFileQuietly(retired);
+  }
+  cleanStaleBindingFiles(target);
+}
+
 fs.mkdirSync(outDir, { recursive: true });
-// 先写临时文件再 rename，不能直接覆盖 binding.node：开发期 Electron 可能正映射着旧
-// 产物，原地覆盖后 macOS 代码签名缓存失效，下次 dlopen 会被 SIGKILL
 const outFile = path.join(outDir, 'binding.node');
-const tempOut = `${outFile}.${process.pid}.tmp`;
-fs.copyFileSync(built, tempOut);
-fs.renameSync(tempOut, outFile);
+publishBinding(built, outFile);
 console.log(`[build-muhammara] 完成：${outFile}`);
