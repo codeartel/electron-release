@@ -3,7 +3,7 @@
  * 将 electron 仓库中「发布打包」所需的文件同步到 electron-release 仓库。
  *
  * 背景：electron-release 是用于 GitHub Actions 打包的镜像仓库；本脚本替代手动拷贝，
- * 由 rollup 每次构建成功后自动触发（见 rollup.config.ts 中的 sync-release 插件），
+ * 由 rollup 每次构建成功后自动触发（见 rollup.config.mjs 中的 sync-release 插件），
  * 也可随时手动执行：
  *
  *   node scripts/sync-release.mjs               # 完整输出
