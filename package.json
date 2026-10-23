@@ -1,12 +1,13 @@
 {
   "name": "shuli",
-  "version": "0.13.1",
+  "version": "0.13.2",
   "description": "书立",
   "private": true,
   "main": "dist/index.js",
   "scripts": {
     "build": "node scripts/build-native.mjs && rollup --config rollup.config.mjs --watch",
     "build-native": "node scripts/build-native.mjs",
+    "electron:install": "node -e \"process.env.ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/';require('node:child_process').execFileSync(process.execPath,['node_modules/electron/install.js'],{stdio:'inherit'})\"",
     "typecheck": "tsc --noEmit",
     "typecheck:watch": "tsc --noEmit --watch",
     "sync-release": "node scripts/sync-release.mjs",
@@ -37,7 +38,7 @@
     "archiver": "^7.0.1",
     "compare-versions": "^6.1.1",
     "css-loader": "^7.1.2",
-    "electron": "44.9.0",
+    "electron": "45.0.0",
     "electron-builder": "26.17.0",
     "electron-updater": "6.8.9",
     "electron-window-state": "5.0.3",

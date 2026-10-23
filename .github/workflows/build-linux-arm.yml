@@ -6,6 +6,13 @@ on:
       - 'v*'
   workflow_dispatch:
 
+env:
+  # muhammara binding 的编译镜像：debian bullseye（glibc 2.31）。
+  # 直接用 ubuntu-24.04-arm（glibc 2.39）现编会让产物硬依赖 GLIBC_2.38，
+  # Ubuntu 22.04 / Debian 12 / UOS 等用户加载该模块直接失败 → PDF 导出无文件。
+  # 同时保证 libstdc++ 下限不高于 6.0.28（Ubuntu 20.04 自带版本）。
+  MUHAMMARA_BUILD_CONTAINER: node:20-bullseye
+
 jobs:
   build-linux-arm:
     runs-on: ubuntu-24.04-arm
@@ -29,9 +36,12 @@ jobs:
           electron=$(node -p 'require("./node_modules/electron/package.json").version')
           muhammara=$(sed -n "s/.*MUHAMMARA_VERSION = '\([^']*\)'.*/\1/p" scripts/build-muhammara.mjs | head -1)
           test -n "$electron" && test -n "$muhammara"
+          # 编译环境（容器镜像）必须参与缓存键：否则更换 glibc 基线后仍会命中旧的
+          # GLIBC_2.38 产物，等于没改
+          container=$(printf '%s' "${MUHAMMARA_BUILD_CONTAINER:-host}" | tr -c 'A-Za-z0-9._-' '-')
           echo "electron=$electron" >> "$GITHUB_OUTPUT"
           echo "muhammara=$muhammara" >> "$GITHUB_OUTPUT"
-          echo "cache-key=muhammara-${{ runner.os }}-${{ runner.arch }}-electron-${electron}-muhammara-${muhammara}-script-${{ hashFiles('scripts/build-muhammara.mjs') }}-wrapper-${{ hashFiles('scripts/build-native.mjs') }}" >> "$GITHUB_OUTPUT"
+          echo "cache-key=muhammara-${{ runner.os }}-${{ runner.arch }}-electron-${electron}-muhammara-${muhammara}-container-${container}-script-${{ hashFiles('scripts/build-muhammara.mjs') }}-wrapper-${{ hashFiles('scripts/build-native.mjs') }}" >> "$GITHUB_OUTPUT"
 
       # 仅恢复缓存；保存统一由编译成功后的 Save 步骤负责（save-always 已废弃且行为不符预期）
       - name: Restore muhammara binding
@@ -47,6 +57,15 @@ jobs:
       - name: Build muhammara binding
         id: build-binding
         run: node scripts/build-native.mjs
+        env:
+          SLINOTE_MUHAMMARA_CONTAINER: ${{ env.MUHAMMARA_BUILD_CONTAINER }}
+
+      # 打包前守门：产物不得要求高于构建容器基线的 glibc，否则旧发行版加载即失败。
+      # 必须在 Save cache 之前执行，避免不合规产物进入缓存
+      - name: Verify glibc baseline
+        run: |
+          node scripts/check-glibc.mjs native/muhammara/binding.node --max=2.31
+          node scripts/check-glibc.mjs native/history/binding.node --max=2.31
 
       # 编译成功后立即保存缓存（不等整个 job 成功），避免后续签名/打包失败导致下次运行重新编译
       - name: Save muhammara binding

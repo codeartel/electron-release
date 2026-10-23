@@ -8,6 +8,11 @@
  * - 基于 7.0.0-beta.1：官方 src/nodes.h 已内建 V8 版本条件编译（V8 >= 14.8 使用
  *   ExternalPointerTypeTag），Electron 43（V8 15）直接命中新 API，无需补丁；
  *   脚本保留旧版源码的补丁逻辑（幂等，beta.1 自动跳过）
+ * - HolderV2 / setter 回调适配 Electron 45（V8 15.6）：官方按 V8_MAJOR_VERSION >= 14
+ *   选用 info.HolderV2()，该 API 在 V8 15.0 标记弃用、15.6 彻底移除；它与 info.Holder()
+ *   读同一个 holder 槽位，脚本统一改写为 Holder()（旧版 V8 同样成立）。同理 V8 15.6 删除了
+ *   接受旧 AccessorNameSetterCallback（PropertyCallbackInfo<void>）的 SetNativeDataProperty
+ *   重载，脚本将 PROPERTY_SETTER_TYPE 在 V8 >= 15.6 切为 PropertyCallbackInfo<Boolean>
  * - 裁剪 OpenSSL：定义 PDFHUMMUS_NO_OPENSSL 并移除 openssl 构建/链接依赖后，
  *   不再静态链接 libcrypto（体积约减半）；仅 PDF 2.0/AES-256 加密不可用，
  *   RC4/AES-128 由内置 LibAesgm 实现，合并/大纲等全部功能不受影响
@@ -24,8 +29,10 @@
  * 注意：
  * - 必须在目标平台执行（mac/win/linux 产物不可混用），Electron 升级后需重新执行
  * - 需要本地具备编译工具链（Xcode Command Line Tools / VS Build Tools / gcc）
+ * - Linux 产物的 glibc 下限由编译机决定，发布用产物必须在老 glibc 容器内编译
+ *   （见下方第 0 步与 .github/workflows/build-linux-*.yml）
  */
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -64,6 +71,51 @@ function run(command, cwd) {
   execSync(command, { cwd, stdio: 'inherit' });
 }
 
+// 0. Linux 构建环境隔离：binding.node 会记录编译机的 glibc 符号版本，在 ubuntu-latest
+//    （24.04 / glibc 2.39）上现编会硬依赖 GLIBC_2.38（C23 的 __isoc23_strtoll 等），
+//    Ubuntu 22.04 / Debian 12 / UOS 等用户加载 native 模块时直接失败——PDF 合并 worker
+//    起不来，导出流程删掉 .part，表现为「导出 PDF 成功提示但目录里没有文件」。
+//    CI 通过 SLINOTE_MUHAMMARA_CONTAINER=<镜像> 指定老 glibc 镜像，脚本据此在容器内
+//    重新执行自身；本地开发不设置该变量，仍按本机工具链直接编译。
+const containerImage = process.env.SLINOTE_MUHAMMARA_CONTAINER;
+const insideContainer = process.env.SLINOTE_MUHAMMARA_CONTAINER_ACTIVE === '1';
+if (process.platform === 'linux' && containerImage && !insideContainer) {
+  if (!/^[\w./:@-]+$/.test(containerImage)) {
+    console.error(`[build-muhammara] SLINOTE_MUHAMMARA_CONTAINER 镜像名非法：${containerImage}`);
+    process.exit(1);
+  }
+  try {
+    execFileSync('docker', ['--version'], { stdio: 'ignore' });
+  } catch {
+    console.error('[build-muhammara] 未找到 docker，无法在容器内编译（SLINOTE_MUHAMMARA_CONTAINER 已设置）');
+    process.exit(1);
+  }
+  console.log(`[build-muhammara] 在容器 ${containerImage} 内编译（隔离宿主机 glibc）`);
+  const result = spawnSync(
+    'docker',
+    [
+      'run',
+      '--rm',
+      // 以宿主 uid/gid 运行，避免产物与 .native-build 被 root 持有
+      '--user', `${process.getuid()}:${process.getgid()}`,
+      '-e', 'HOME=/tmp',
+      '-e', 'SLINOTE_MUHAMMARA_CONTAINER_ACTIVE=1',
+      '-v', `${rootDir}:${rootDir}`,
+      '-w', rootDir,
+      containerImage,
+      'node', fileURLToPath(import.meta.url)
+    ],
+    { stdio: 'inherit' }
+  );
+  if (result.error) {
+    console.error(`[build-muhammara] 容器启动失败：${result.error.message}`);
+    process.exit(1);
+  }
+  process.exit(result.status ?? 1);
+} else if (process.platform === 'linux' && !insideContainer) {
+  console.warn('[build-muhammara] 未指定 SLINOTE_MUHAMMARA_CONTAINER：按本机 glibc 直接编译，产物仅限本机使用，不可用于发布');
+}
+
 // 1. 下载源码包（含 C++ 源码与构建脚本）
 fs.rmSync(workDir, { recursive: true, force: true });
 fs.mkdirSync(workDir, { recursive: true });
@@ -80,19 +132,57 @@ const packageDir = path.join(workDir, 'package');
 
 // 2. V8 External tag 兼容处理（beta.1 起官方已内建条件编译，旧版源码走补丁）
 const nodesHeader = path.join(packageDir, 'src', 'nodes.h');
-const nodesSource = fs.readFileSync(nodesHeader, 'utf8');
+let nodesSource = fs.readFileSync(nodesHeader, 'utf8');
+let nodesDirty = false;
 if (nodesSource.includes('V8_MAJOR_VERSION > 14')) {
-  console.log('[build-muhammara] 源码已内建 V8 条件编译，跳过补丁');
+  console.log('[build-muhammara] 源码已内建 V8 External tag 条件编译，跳过补丁');
 } else {
   const nodesPatched = nodesSource
     .split('e->Value()').join('e->Value(v8::kExternalPointerTypeTagDefault)')
     .split('External::New(isolate, c1)').join('External::New(isolate, c1, v8::kExternalPointerTypeTagDefault)');
   if (nodesPatched !== nodesSource) {
-    fs.writeFileSync(nodesHeader, nodesPatched);
+    nodesSource = nodesPatched;
+    nodesDirty = true;
     console.log('[build-muhammara] 已应用 V8 External tag 兼容补丁（src/nodes.h）');
   } else {
-    console.log('[build-muhammara] 兼容补丁已存在，跳过');
+    console.log('[build-muhammara] External tag 兼容补丁已存在，跳过');
   }
+}
+
+// 2.1 HolderV2 移除兼容（V8 15.0 标注弃用、15.6 即 Electron 45 彻底删除）：
+//     上游判定 V8_MAJOR_VERSION >= 14 就用 HolderV2 是误判——它与 Holder() 读取同一个
+//     kHolderIndex 槽位，语义完全一致，直接改写后旧版 V8 也成立
+const HOLDER_V2_DEFINE = '#define PROPERTY_HOLDER(info) info.HolderV2()';
+if (nodesSource.includes(HOLDER_V2_DEFINE)) {
+  nodesSource = nodesSource.replace(HOLDER_V2_DEFINE, '#define PROPERTY_HOLDER(info) info.Holder()');
+  nodesDirty = true;
+  console.log('[build-muhammara] 已应用 PROPERTY_HOLDER → Holder() 兼容补丁（src/nodes.h）');
+} else {
+  console.log('[build-muhammara] PROPERTY_HOLDER 已是 Holder()，跳过');
+}
+
+// 2.2 访问器 setter 回调签名升级：V8 15.6（Electron 45）删除了接受旧
+//     AccessorNameSetterCallback（PropertyCallbackInfo<void>）的 SetNativeDataProperty
+//     重载，只保留 V2 签名（PropertyCallbackInfo<Boolean>）；两者默认返回值同为 true，
+//     仓库内 setter 只用 holder/异常，不读返回值，因此仅切类型即可
+const SETTER_VOID_DEFINE = '#define PROPERTY_SETTER_TYPE v8::PropertyCallbackInfo<void>';
+const SETTER_V2_BLOCK = [
+  '#if V8_MAJOR_VERSION > 15 || (V8_MAJOR_VERSION == 15 && V8_MINOR_VERSION >= 6)',
+  '    #define PROPERTY_SETTER_TYPE v8::PropertyCallbackInfo<v8::Boolean>',
+  '#else',
+  '    #define PROPERTY_SETTER_TYPE v8::PropertyCallbackInfo<void>',
+  '#endif'
+].join('\n');
+if (nodesSource.includes(SETTER_VOID_DEFINE)) {
+  nodesSource = nodesSource.replace(SETTER_VOID_DEFINE, SETTER_V2_BLOCK);
+  nodesDirty = true;
+  console.log('[build-muhammara] 已应用 setter 回调 PropertyCallbackInfo<Boolean> 兼容补丁（src/nodes.h）');
+} else {
+  console.log('[build-muhammara] setter 回调签名补丁已存在，跳过');
+}
+
+if (nodesDirty) {
+  fs.writeFileSync(nodesHeader, nodesSource);
 }
 
 // 3. gyp 改造：
