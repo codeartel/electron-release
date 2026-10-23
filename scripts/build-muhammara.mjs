@@ -71,6 +71,23 @@ function run(command, cwd) {
   execSync(command, { cwd, stdio: 'inherit' });
 }
 
+/**
+ * 用 node-gyp 实际调用的 C++ 编译器做一次「头文件可用性」语法探测。
+ * CXX 允许带参数（如 ccache g++），因此交给 shell 解释；探测失败一律视为不可用。
+ */
+function supportsCxxHeader(header) {
+  const cxx = process.env.CXX || 'g++';
+  try {
+    execSync(`${cxx} -std=gnu++20 -x c++ -fsyntax-only -`, {
+      input: `#include <${header}>\nint main() { return 0; }\n`,
+      stdio: ['pipe', 'ignore', 'ignore']
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // 0. Linux 构建环境隔离：binding.node 会记录编译机的 glibc 符号版本，在 ubuntu-latest
 //    （24.04 / glibc 2.39）上现编会硬依赖 GLIBC_2.38（C23 的 __isoc23_strtoll 等），
 //    Ubuntu 22.04 / Debian 12 / UOS 等用户加载 native 模块时直接失败——PDF 合并 worker
@@ -183,6 +200,69 @@ if (nodesSource.includes(SETTER_VOID_DEFINE)) {
 
 if (nodesDirty) {
   fs.writeFileSync(nodesHeader, nodesSource);
+}
+
+// 2.5 C++20 <source_location> 后端口：Electron 45 / V8 15.6 的 v8-source-location.h
+//     无条件 #include <source_location>（无宏开关），而 libstdc++ 直到 GCC 11 才提供该头
+//     文件。glibc 2.31 的构建镜像（debian bullseye，用于保证旧发行版可加载）默认 gcc 10
+//     会在此处直接编译失败：`fatal error: source_location: No such file or directory`。
+//     检测到编译器缺失时，写一个最小实现（__builtin_FILE/LINE/FUNCTION）并把目录插到
+//     include 路径，语义与 GCC 11+ 的 current() 默认实参一致；编译器自带该头时完全不介入。
+const SOURCE_LOCATION_COMPAT_SOURCE = `// 最小 C++20 <source_location> 后端口（仅供缺少该头的 libstdc++，如 GCC 10 使用）
+#ifndef SLINOTE_COMPAT_SOURCE_LOCATION_H_
+#define SLINOTE_COMPAT_SOURCE_LOCATION_H_
+
+#include <cstdint>
+
+namespace std {
+
+class source_location {
+ public:
+  static constexpr source_location current(
+      const char* file = __builtin_FILE(),
+      const char* function = __builtin_FUNCTION(),
+      uint_least32_t line = __builtin_LINE()) noexcept {
+    return source_location(file, function, line);
+  }
+
+  constexpr source_location() noexcept = default;
+
+  constexpr const char* file_name() const noexcept { return file_; }
+  constexpr const char* function_name() const noexcept { return function_; }
+  constexpr uint_least32_t line() const noexcept { return line_; }
+  constexpr uint_least32_t column() const noexcept { return 0; }
+
+ private:
+  constexpr source_location(const char* file, const char* function, uint_least32_t line) noexcept
+      : file_(file), function_(function), line_(line) {}
+
+  const char* file_ = "";
+  const char* function_ = "";
+  uint_least32_t line_ = 0;
+};
+
+}  // namespace std
+
+#endif  // SLINOTE_COMPAT_SOURCE_LOCATION_H_
+`;
+const REQUIRED_CXX20_HEADERS = ['span', 'bit', 'compare', 'concepts'];
+const missingHeaders = REQUIRED_CXX20_HEADERS.filter((header) => !supportsCxxHeader(header));
+if (missingHeaders.length) {
+  console.error(`[build-muhammara] 编译器缺少 V8 15.6 头依赖的 C++20 标准库组件：${missingHeaders.join(', ')}`);
+  console.error('[build-muhammara] 这些组件无法后端口，请换用 gcc >= 11 的构建环境（Linux glibc 基线会随之提高到该环境版本）');
+  process.exit(1);
+}
+if (!supportsCxxHeader('source_location')) {
+  const compatDir = path.join(workDir, 'compat', 'cxx20');
+  fs.mkdirSync(compatDir, { recursive: true });
+  fs.writeFileSync(path.join(compatDir, 'source_location'), SOURCE_LOCATION_COMPAT_SOURCE);
+  // 用 CPATH 注入：gcc/g++ 会把 CPATH 里的目录追加到 -I 搜索链，且随环境变量传给
+  // node-gyp → make → 编译器，无需改 binding.gyp（gyp 的 target_defaults 列表字段会被
+  // target 自身同名配置整体覆盖，靠它注入 include_dirs 不可靠）
+  process.env.CPATH = process.env.CPATH ? `${compatDir}${path.delimiter}${process.env.CPATH}` : compatDir;
+  console.log(`[build-muhammara] 编译器缺少 <source_location>，已启用最小后端口：${compatDir}`);
+} else {
+  console.log('[build-muhammara] 编译器自带 <source_location>，无需后端口');
 }
 
 // 3. gyp 改造：
