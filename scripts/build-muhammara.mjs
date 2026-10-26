@@ -88,6 +88,19 @@ function supportsCxxHeader(header) {
   }
 }
 
+/**
+ * 确认上面的探测命令本身能跑（编译器存在）：否则「命令不存在」会被误判成「缺头文件」
+ */
+function cxxAvailable() {
+  const cxx = process.env.CXX || 'g++';
+  try {
+    execSync(`${cxx} --version`, { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // 0. Linux 构建环境隔离：binding.node 会记录编译机的 glibc 符号版本，在 ubuntu-latest
 //    （24.04 / glibc 2.39）上现编会硬依赖 GLIBC_2.38（C23 的 __isoc23_strtoll 等），
 //    Ubuntu 22.04 / Debian 12 / UOS 等用户加载 native 模块时直接失败——PDF 合并 worker
@@ -208,6 +221,9 @@ if (nodesDirty) {
 //     会在此处直接编译失败：`fatal error: source_location: No such file or directory`。
 //     检测到编译器缺失时，写一个最小实现（__builtin_FILE/LINE/FUNCTION）并把目录插到
 //     include 路径，语义与 GCC 11+ 的 current() 默认实参一致；编译器自带该头时完全不介入。
+//     平台边界：探测用的是 g++ 命令行（-std=gnu++20 -fsyntax-only -），只对 Linux 有意义；
+//     macOS（Apple clang）与 Windows（MSVC，cl 只在开发者命令行里）自带全部 C++20 头，
+//     在那边跑探测只会把「没有 g++」误判成「缺标准库组件」而中断构建。
 const SOURCE_LOCATION_COMPAT_SOURCE = `// 最小 C++20 <source_location> 后端口（仅供缺少该头的 libstdc++，如 GCC 10 使用）
 #ifndef SLINOTE_COMPAT_SOURCE_LOCATION_H_
 #define SLINOTE_COMPAT_SOURCE_LOCATION_H_
@@ -246,23 +262,30 @@ class source_location {
 #endif  // SLINOTE_COMPAT_SOURCE_LOCATION_H_
 `;
 const REQUIRED_CXX20_HEADERS = ['span', 'bit', 'compare', 'concepts'];
-const missingHeaders = REQUIRED_CXX20_HEADERS.filter((header) => !supportsCxxHeader(header));
-if (missingHeaders.length) {
-  console.error(`[build-muhammara] 编译器缺少 V8 15.6 头依赖的 C++20 标准库组件：${missingHeaders.join(', ')}`);
-  console.error('[build-muhammara] 这些组件无法后端口，请换用 gcc >= 11 的构建环境（Linux glibc 基线会随之提高到该环境版本）');
+if (process.platform !== 'linux') {
+  console.log(`[build-muhammara] ${process.platform} 使用系统编译器（MSVC/Apple clang），自带 C++20 头，跳过 C++20 探测与后端口`);
+} else if (!cxxAvailable()) {
+  console.error(`[build-muhammara] 未找到 C++ 编译器（CXX=${process.env.CXX || 'g++'}），请先安装 gcc/g++ 工具链`);
   process.exit(1);
-}
-if (!supportsCxxHeader('source_location')) {
-  const compatDir = path.join(workDir, 'compat', 'cxx20');
-  fs.mkdirSync(compatDir, { recursive: true });
-  fs.writeFileSync(path.join(compatDir, 'source_location'), SOURCE_LOCATION_COMPAT_SOURCE);
-  // 用 CPATH 注入：gcc/g++ 会把 CPATH 里的目录追加到 -I 搜索链，且随环境变量传给
-  // node-gyp → make → 编译器，无需改 binding.gyp（gyp 的 target_defaults 列表字段会被
-  // target 自身同名配置整体覆盖，靠它注入 include_dirs 不可靠）
-  process.env.CPATH = process.env.CPATH ? `${compatDir}${path.delimiter}${process.env.CPATH}` : compatDir;
-  console.log(`[build-muhammara] 编译器缺少 <source_location>，已启用最小后端口：${compatDir}`);
 } else {
-  console.log('[build-muhammara] 编译器自带 <source_location>，无需后端口');
+  const missingHeaders = REQUIRED_CXX20_HEADERS.filter((header) => !supportsCxxHeader(header));
+  if (missingHeaders.length) {
+    console.error(`[build-muhammara] 编译器缺少 V8 15.6 头依赖的 C++20 标准库组件：${missingHeaders.join(', ')}`);
+    console.error('[build-muhammara] 这些组件无法后端口，请换用 gcc >= 11 的构建环境（Linux glibc 基线会随之提高到该环境版本）');
+    process.exit(1);
+  }
+  if (!supportsCxxHeader('source_location')) {
+    const compatDir = path.join(workDir, 'compat', 'cxx20');
+    fs.mkdirSync(compatDir, { recursive: true });
+    fs.writeFileSync(path.join(compatDir, 'source_location'), SOURCE_LOCATION_COMPAT_SOURCE);
+    // 用 CPATH 注入：gcc/g++ 会把 CPATH 里的目录追加到 -I 搜索链，且随环境变量传给
+    // node-gyp → make → 编译器，无需改 binding.gyp（gyp 的 target_defaults 列表字段会被
+    // target 自身同名配置整体覆盖，靠它注入 include_dirs 不可靠）
+    process.env.CPATH = process.env.CPATH ? `${compatDir}${path.delimiter}${process.env.CPATH}` : compatDir;
+    console.log(`[build-muhammara] 编译器缺少 <source_location>，已启用最小后端口：${compatDir}`);
+  } else {
+    console.log('[build-muhammara] 编译器自带 <source_location>，无需后端口');
+  }
 }
 
 // 3. gyp 改造：
