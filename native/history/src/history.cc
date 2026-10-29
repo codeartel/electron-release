@@ -283,6 +283,42 @@ napi_value DiffJson(napi_env env, napi_callback_info info) {
   return MakeBuffer(env, out.data(), out.size());
 }
 
+// ---------------------------------------------------------------------------
+// mergeEditor(base: Buffer, local: Buffer, remote: Buffer) -> Buffer（UTF-8 JSON 文本）
+// 返回体是内核的整段 JSON（含 ok），业务错误由 JSON 表达，解析不出来才抛错
+// ---------------------------------------------------------------------------
+napi_value MergeEditor(napi_env env, napi_callback_info info) {
+  size_t argc = 3;
+  napi_value argv[3] = {nullptr, nullptr, nullptr};
+  napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+
+  if (argc < 3) {
+    ThrowTypeError(env, "mergeEditor(base, local, remote) requires three byte inputs");
+    return nullptr;
+  }
+
+  const uint8_t* baseData = nullptr;
+  size_t baseLen = 0;
+  const uint8_t* localData = nullptr;
+  size_t localLen = 0;
+  const uint8_t* remoteData = nullptr;
+  size_t remoteLen = 0;
+  if (!ArgBytes(env, argv[0], &baseData, &baseLen) || !ArgBytes(env, argv[1], &localData, &localLen) ||
+      !ArgBytes(env, argv[2], &remoteData, &remoteLen)) {
+    ThrowTypeError(env, "mergeEditor(base, local, remote) requires Buffer/Uint8Array arguments");
+    return nullptr;
+  }
+
+  std::vector<uint8_t> out;
+  std::string error;
+  if (!slinote_history::MergeEditorJson(baseData, baseLen, localData, localLen,
+                                       remoteData, remoteLen, &out, &error)) {
+    ThrowError(env, error);
+    return nullptr;
+  }
+  return MakeBuffer(env, out.data(), out.size());
+}
+
 }  // namespace
 
 NAPI_MODULE_INIT() {
@@ -293,6 +329,7 @@ NAPI_MODULE_INIT() {
     {"compress", nullptr, Compress, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"decompress", nullptr, Decompress, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"diffJson", nullptr, DiffJson, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"mergeEditor", nullptr, MergeEditor, nullptr, nullptr, nullptr, napi_default, nullptr},
   };
   napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
   return exports;

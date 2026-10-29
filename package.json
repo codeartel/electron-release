@@ -1,6 +1,6 @@
 {
   "name": "shuli",
-  "version": "0.13.4",
+  "version": "0.13.5",
   "description": "书立",
   "private": true,
   "main": "dist/index.js",
@@ -38,7 +38,7 @@
     "archiver": "^7.0.1",
     "compare-versions": "^6.1.1",
     "css-loader": "^7.1.2",
-    "electron": "45.0.0",
+    "electron": "45.1.0",
     "electron-builder": "26.17.0",
     "electron-updater": "6.8.9",
     "electron-window-state": "5.0.3",

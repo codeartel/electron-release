@@ -31,6 +31,9 @@ native/history/deps/zstd
 npm-debug.log*
 
 # .dbg 调试工作区临时产物（脚本一律保留）
+# 验收截图是二进制且体量极大（一轮真机验收可达数百张），留在工作区会让
+# 变更列表逐张生成 diff 而卡死，需要留存时放到 /tmp 下
+.dbg/**/*.png
 .dbg/tsc-*.txt
 .dbg/*.log
 .dbg/*.pdf

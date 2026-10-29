@@ -63,6 +63,27 @@ bool DiffJson(const uint8_t* aData, size_t aLen,
               const uint8_t* bData, size_t bLen,
               std::vector<uint8_t>* out, std::string* error);
 
+/** 三方合并单份输入上限 16MB（base/local/remote 三份同时驻留，低于 patch 的 64MB 口径） */
+constexpr uint64_t kMaxMergeInput = 16ull * 1024 * 1024;
+/** 文本三方合并的字符级动态规划上限（单段），超限按整段冲突处理 */
+constexpr size_t kMaxMergeTextChars = 1024;
+/** 三方合并递归深度上限（超限按不可表达回落明文路径） */
+constexpr int kMaxMergeDepth = 512;
+
+/**
+ * 编辑器文档树三方合并（同步冲突预合并）：
+ * 入参为三份完整 state 明文（UTF-8 JSON），内核自行定位 /data 子树；
+ * 输出 UTF-8 JSON 文本：
+ *   {"ok":true,"data":<merged>,"conflicts":[...],"auto":N}
+ *   {"ok":false,"reason":"<不可表达原因>"}
+ * 恒返回 true 除非内核级失败（解析/超限/内部错误），此时 *error 有值；
+ * 业务级不可表达（type 双改、超深等）走 ok:false，由调用方回落明文双写路径。
+ */
+bool MergeEditorJson(const uint8_t* baseData, size_t baseLen,
+                     const uint8_t* localData, size_t localLen,
+                     const uint8_t* remoteData, size_t remoteLen,
+                     std::vector<uint8_t>* out, std::string* error);
+
 }  // namespace slinote_history
 
 #endif  // SLINOTE_HISTORY_KERNEL_H_
