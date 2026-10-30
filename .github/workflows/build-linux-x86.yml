@@ -11,8 +11,8 @@ on:
         type: string
         required: false
         default: ''
-      upload_artifact:
-        description: '额外上传 Actions artifact 作为兜底（占用账号级 artifact 存储额度，默认关闭）'
+      skip_artifact:
+        description: '跳过 Actions artifact 上传（默认上传；额度紧张或只想用 Release 时勾选）'
         type: boolean
         default: false
 
@@ -91,8 +91,12 @@ jobs:
             .native-build/stamp.json
           key: ${{ steps.versions.outputs.cache-key }}
 
+      # --publish never：CI 里存在 GH_TOKEN 时 electron-builder 会默认接管发布（onTagOrDraft），
+      # 与后面的 gh release upload 形成双写者（报 overwrite published file / already exists），
+      # 且 electron-publish 拼 ?name= 时不做 URL 编码，中文文件名会炸
+      # "Request path contains unescaped characters"。发布统一由 Publish to GitHub Release 负责
       - name: Build Linux x64
-        run: npx electron-builder --linux --x64
+        run: npx electron-builder --linux --x64 --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -125,10 +129,11 @@ jobs:
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --title "$TAG" --notes "自动打包产物（草稿，确认后发布）" || true
           gh release upload "$TAG" publish/* --repo "$GITHUB_REPOSITORY" --clobber
 
-      # 兜底通道：默认关闭（不再占用 artifact 额度），需要临时取件时手动触发并勾选；
-      # 额度仍被占满时由 continue-on-error 兜住，不影响整轮打包结论
-      - name: Upload artifacts (optional fallback)
-        if: inputs.upload_artifact
+      # 默认上传 artifact，方便直接从 run 页面取件；正式产物同时已发到 GitHub Release。
+      # 额度紧张时可在手动触发时勾选 skip_artifact 跳过；
+      # 额度被占满时由 continue-on-error 兜住，不会让整轮打包判红
+      - name: Upload artifacts
+        if: inputs.skip_artifact != true
         continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
