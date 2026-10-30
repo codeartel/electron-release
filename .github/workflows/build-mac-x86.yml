@@ -5,6 +5,15 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      upload_artifact:
+        description: '额外上传 Actions artifact 作为兜底（占用账号级 artifact 存储额度，默认关闭）'
+        type: boolean
+        default: false
+
+permissions:
+  # 产物发布到 GitHub Release 需要写入权限
+  contents: write
 
 jobs:
   build-mac-x86:
@@ -98,7 +107,30 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx electron-builder --mac --x64
 
-      - name: Upload artifacts
+      # 产物走 GitHub Release：Release 附件不计入 Actions artifact 存储额度，
+      # 而 artifact 额度是账号级共享的，一旦超额会让上传步骤失败、整轮打包无产出。
+      # 两个 mac 架构各自生成同名 latest-mac.yml，同名附件会互相覆盖，故按架构改名；
+      # 同步到更新源 file.slinote.com/installer/mac 时再改回 latest-mac.yml
+      - name: Publish to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          mkdir -p publish
+          cp release/*.dmg release/*.zip release/*.dmg.blockmap release/*.zip.blockmap publish/
+          cp release/latest-mac.yml publish/latest-mac-x64.yml
+          # 四个平台工作流会并行给同一 tag 建草稿 Release，已存在（422）时忽略创建失败
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --title "$GITHUB_REF_NAME" --notes "自动打包产物（草稿，确认后发布）" || true
+          gh release upload "$GITHUB_REF_NAME" publish/* --repo "$GITHUB_REPOSITORY" --clobber
+
+      # 兜底通道：默认关闭（不再占用 artifact 额度），需要临时取件时手动触发并勾选；
+      # 额度仍被占满时由 continue-on-error 兜住，不影响整轮打包结论
+      - name: Upload artifacts (optional fallback)
+        if: inputs.upload_artifact
+        continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
           name: mac-x64
@@ -109,6 +141,7 @@ jobs:
             release/*.zip.blockmap
             release/latest-mac.yml
           if-no-files-found: ignore
+          retention-days: 3
 
       - name: Cleanup keychain
         if: always()
